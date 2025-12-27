@@ -12,8 +12,8 @@ use std::time::Duration;
 
 const TILE_SIZE: f32 = 16.0;
 const TILE_GAP: f32 = 2.0;
-const ROWS: u32 = 20;
-const COLS: u32 = 20;
+const ROWS: usize = 20;
+const COLS: usize = 20;
 
 const COLOR_BACKGROUND: Color = Color::srgb(0.8, 0.8, 0.8);
 const COLOR_ALIVE: Color = Color::srgb(0.0, 0.0, 0.0);
@@ -41,8 +41,8 @@ struct CurrentTile {
 #[derive(Resource)]
 struct Grid {
     cells: Vec<Option<Entity>>,
-    state: Vec<bool>,
-    new_state: Vec<bool>,
+    state: [[bool;COLS];ROWS],
+    new_state: [[bool;COLS];ROWS],
     rows: usize,
     cols: usize,
 }
@@ -50,17 +50,13 @@ struct Grid {
 impl Grid {
     fn new(rows: usize, cols: usize) -> Self {
         let mut cells: Vec<Option<Entity>> = Vec::with_capacity(rows * cols);
-        let mut state = Vec::with_capacity(rows * cols);
-        let mut new_state = Vec::with_capacity(rows * cols);
         for _ in 0..(rows * cols) {
             cells.push(None);
-            state.push(false);
-            new_state.push(false);
         }
         Grid {
             cells,
-            state,
-            new_state,
+            state: [[false;COLS];ROWS],
+            new_state: [[false;COLS];ROWS],
             rows,
             cols,
         }
@@ -102,11 +98,11 @@ fn main() {
 }
 
 fn grid_width() -> u32 {
-    (TILE_SIZE + TILE_GAP) as u32 * COLS
+    (TILE_SIZE + TILE_GAP) as u32 * COLS as u32
 }
 
 fn grid_height() -> u32 {
-    (TILE_SIZE + TILE_GAP) as u32 * ROWS
+    (TILE_SIZE + TILE_GAP) as u32 * ROWS as u32
 }
 
 fn setup_grid(mut commands: Commands) {
@@ -130,7 +126,7 @@ fn setup_grid(mut commands: Commands) {
                     Cell,
                 ))
                 .id();
-            let index = (row * (grid.cols as u32) + column) as usize;
+            let index = (row * grid.cols + column) as usize;
             grid.cells[index] = Some(cell);
         }
     }
@@ -150,67 +146,28 @@ fn setup_ui(mut commands: Commands) {
     commands.insert_resource(current_tile);
 }
 
-fn update_cells(mut grid: ResMut<Grid>, mut cell_query: Query<&mut Sprite, With<Cell>>) {
-    let max_row = ROWS as i32 - 1;
-    let max_col = COLS as i32 - 1;
 
-    // check each cell and update grid.new_state to mark them alive or dead
+fn update_cells(mut grid: ResMut<Grid>, mut cell_query: Query<&mut Sprite, With<Cell>>) {
     for row in 0..ROWS {
         for col in 0..COLS {
-            let index = (row as usize) * grid.cols + (col as usize);
-            let current_state = grid.state[index];
-
-            let mut neighbors_alive = 0;
-            // (row,col) offset of each adjacent cell
-            let neighbors: [(i32, i32); 8] = [
-                (-1, -1),
-                (-1, 0),
-                (-1, 1),
-                (0, -1),
-                (0, 1),
-                (1, -1),
-                (1, 0),
-                (1, 1),
-            ];
-            for (y, x) in neighbors {
-                let mut new_row = row as i32 + y;
-                let mut new_col = col as i32 + x;
-
-                // wrap around the edges
-                if new_row < 0 {
-                    new_row = max_row;
-                } else if new_row > max_row {
-                    new_row = 0;
-                }
-                if new_col < 0 {
-                    new_col = max_col;
-                } else if new_col > max_col {
-                    new_col = 0;
-                }
-
-                let neighbor_index = (new_row as usize) * grid.cols + (new_col as usize);
-                if grid.state[neighbor_index] {
-                    neighbors_alive += 1;
-                }
-            }
-
+            let current_state = grid.state[row][col];
             let mut new_state = current_state;
+            let num_neighbors_alive = living_neighbors(&grid.state,row,col);
             if current_state == true {
                 //Any live cell with fewer than two live neighbours dies
-                if neighbors_alive < 2 {
+                if num_neighbors_alive < 2 {
                     new_state = false;
                 // Any live cell with more than three live neighbours dies (referred to as overpopulation or overcrowding).
-                } else if neighbors_alive > 3 {
+                } else if num_neighbors_alive > 3 {
                     new_state = false;
                 }
             } else {
                 // Any dead cell with exactly three live neighbours will come to life.
-                if neighbors_alive == 3 {
+                if num_neighbors_alive == 3 {
                     new_state = true;
                 }
             }
-
-            grid.new_state[index] = new_state;
+            grid.new_state[row][col] = new_state;
         }
     }
 
@@ -219,11 +176,10 @@ fn update_cells(mut grid: ResMut<Grid>, mut cell_query: Query<&mut Sprite, With<
         for col in 0..COLS {
             if let Some(cell) = grid.get(row as usize, col as usize) {
                 if let Ok(mut sprite) = cell_query.get_mut(cell) {
-                    let index = (row as usize) * grid.cols + (col as usize);
-                    let current_state = grid.state[index];
-                    let new_state = grid.new_state[index];
+                    let current_state = grid.state[row][col];
+                    let new_state = grid.new_state[row][col];
                     if current_state != new_state {
-                        grid.state[index] = new_state;
+                        grid.state[row][col] = new_state;
                         if new_state {
                             sprite.color = COLOR_ALIVE;
                         } else {
@@ -234,6 +190,42 @@ fn update_cells(mut grid: ResMut<Grid>, mut cell_query: Query<&mut Sprite, With<
             }
         }
     }
+}
+
+fn living_neighbors(state: &[[bool;COLS];ROWS],row: usize,col: usize) -> u32 {
+    let mut neighbors_alive = 0;
+    let max_row = ROWS as i32 - 1;
+    let max_col = COLS as i32 - 1;
+    // (row,col) offset of each adjacent cell
+    let neighbors: [(i32, i32); 8] = [
+        (-1, -1),
+        (-1, 0),
+        (-1, 1),
+        (0, -1),
+        (0, 1),
+        (1, -1),
+        (1, 0),
+        (1, 1),
+    ];
+    for (y, x) in neighbors {
+        let mut new_row = row as i32 + y;
+        let mut new_col = col as i32 + x;
+        // wrap around the edges
+        if new_row < 0 {
+            new_row = max_row;
+        } else if new_row > max_row {
+            new_row = 0;
+        }
+        if new_col < 0 {
+            new_col = max_col;
+        } else if new_col > max_col {
+            new_col = 0;
+        }
+        if state[new_row as usize][new_col as usize] {
+            neighbors_alive += 1;
+        }
+    }
+    neighbors_alive
 }
 
 fn mouse_button_input(
@@ -252,21 +244,21 @@ fn mouse_button_input(
                 let tile_x = (world_position.x / (TILE_SIZE + TILE_GAP)).floor();
                 let tile_y = (world_position.y / (TILE_SIZE + TILE_GAP)).floor();
                 if tile_x >= 0.0 && tile_y >= 0.0 {
-                    let tile_x = tile_x as usize;
-                    let tile_y = tile_y as usize;
+                    let col = tile_x as usize;
+                    let row = tile_y as usize;
                     // check that we're on a different tile
-                    if !(tile_x == current_tile.col && tile_y == current_tile.row) {
-                        if let Some(cell) = grid.get(tile_y, tile_x) {
+                    if !(col == current_tile.col && row == current_tile.row) {
+                        if let Some(cell) = grid.get(row,col) {
                             if let Ok(mut sprite) = query.get_mut(cell) {
                                 // toggle this cell alive or dead
-                                let index = (tile_y as usize) * grid.cols + (tile_x as usize);
-                                let new_state = !grid.state[index];
-                                grid.state[index] = new_state;
+                                //let index = (tile_y as usize) * grid.cols + (tile_x as usize);
+                                let new_state = !grid.state[row][col];
+                                grid.state[row][col] = new_state;
                                 sprite.color = if new_state { COLOR_ALIVE } else { COLOR_DEAD };
                             }
                             // store the current tile we're on
-                            current_tile.col = tile_x;
-                            current_tile.row = tile_y;
+                            current_tile.col = col;
+                            current_tile.row = row;
                         }
                     }
                 }
