@@ -16,6 +16,7 @@ const ROWS: usize = 20;
 const COLS: usize = 20;
 
 const COLOR_BACKGROUND: Color = Color::srgb(0.8, 0.8, 0.8);
+const COLOR_TEXT: Color = Color::srgb(0.0, 0.0, 0.0);
 const COLOR_ALIVE: Color = Color::srgb(0.0, 0.0, 0.0);
 const COLOR_DEAD: Color = Color::srgb(1.0, 1.0, 1.0);
 
@@ -26,8 +27,8 @@ enum GameState {
     Running,
 }
 
-// #[derive(Component)]
-// struct StateLabel;
+#[derive(Component)]
+struct StateLabel;
 
 #[derive(Component)]
 struct Cell;
@@ -41,8 +42,8 @@ struct CurrentTile {
 #[derive(Resource)]
 struct Grid {
     cells: Vec<Option<Entity>>,
-    state: [[bool;COLS];ROWS],
-    new_state: [[bool;COLS];ROWS],
+    state: [[bool; COLS]; ROWS],
+    new_state: [[bool; COLS]; ROWS],
     rows: usize,
     cols: usize,
 }
@@ -55,8 +56,8 @@ impl Grid {
         }
         Grid {
             cells,
-            state: [[false;COLS];ROWS],
-            new_state: [[false;COLS];ROWS],
+            state: [[false; COLS]; ROWS],
+            new_state: [[false; COLS]; ROWS],
             rows,
             cols,
         }
@@ -73,7 +74,7 @@ impl Grid {
 
 fn main() {
     let window_width = grid_width() as f32 * 1.1;
-    let window_height = grid_height() as f32 * 1.1;
+    let window_height = grid_height() as f32 * 1.1 + 50.0;
     App::new()
         .insert_resource(ClearColor(COLOR_BACKGROUND))
         .add_plugins(DefaultPlugins.set(WindowPlugin {
@@ -88,6 +89,7 @@ fn main() {
         .add_systems(Startup, (setup_camera, setup_grid, setup_ui))
         .add_systems(Update, pause_input)
         .add_systems(Update, mouse_button_input)
+        .add_systems(Update, update_text)
         .add_systems(
             Update,
             update_cells
@@ -140,19 +142,29 @@ fn setup_camera(mut commands: Commands) {
 }
 
 fn setup_ui(mut commands: Commands) {
-    // TODO: ui and paused/running message
+    // the last tile that was selected
+    commands.insert_resource(CurrentTile { row: 0, col: 0 });
 
-    let current_tile = CurrentTile { row: 0, col: 0 };
-    commands.insert_resource(current_tile);
+    // the state label
+    commands.spawn((
+        Text::new("Paused"),
+        Node {
+            position_type: PositionType::Absolute,
+            bottom: px(5),
+            left: px(20),
+            ..default()
+        },
+        TextColor(COLOR_TEXT),
+        StateLabel,
+    ));
 }
-
 
 fn update_cells(mut grid: ResMut<Grid>, mut cell_query: Query<&mut Sprite, With<Cell>>) {
     for row in 0..ROWS {
         for col in 0..COLS {
             let current_state = grid.state[row][col];
             let mut new_state = current_state;
-            let num_neighbors_alive = living_neighbors(&grid.state,row,col);
+            let num_neighbors_alive = living_neighbors(&grid.state, row, col);
             if current_state == true {
                 //Any live cell with fewer than two live neighbours dies
                 if num_neighbors_alive < 2 {
@@ -192,7 +204,7 @@ fn update_cells(mut grid: ResMut<Grid>, mut cell_query: Query<&mut Sprite, With<
     }
 }
 
-fn living_neighbors(state: &[[bool;COLS];ROWS],row: usize,col: usize) -> u32 {
+fn living_neighbors(state: &[[bool; COLS]; ROWS], row: usize, col: usize) -> u32 {
     let mut neighbors_alive = 0;
     let max_row = ROWS as i32 - 1;
     let max_col = COLS as i32 - 1;
@@ -221,6 +233,7 @@ fn living_neighbors(state: &[[bool;COLS];ROWS],row: usize,col: usize) -> u32 {
         } else if new_col > max_col {
             new_col = 0;
         }
+
         if state[new_row as usize][new_col as usize] {
             neighbors_alive += 1;
         }
@@ -248,10 +261,9 @@ fn mouse_button_input(
                     let row = tile_y as usize;
                     // check that we're on a different tile
                     if !(col == current_tile.col && row == current_tile.row) {
-                        if let Some(cell) = grid.get(row,col) {
+                        if let Some(cell) = grid.get(row, col) {
                             if let Ok(mut sprite) = query.get_mut(cell) {
                                 // toggle this cell alive or dead
-                                //let index = (tile_y as usize) * grid.cols + (tile_x as usize);
                                 let new_state = !grid.state[row][col];
                                 grid.state[row][col] = new_state;
                                 sprite.color = if new_state { COLOR_ALIVE } else { COLOR_DEAD };
@@ -277,5 +289,15 @@ fn pause_input(
             GameState::Running => next_state.set(GameState::Paused),
             GameState::Paused => next_state.set(GameState::Running),
         }
+    }
+}
+
+fn update_text(state: Res<State<GameState>>, mut q: Query<&mut Text, With<StateLabel>>) {
+    if let Ok(mut label) = q.single_mut() {
+        let new_label = match state.get() {
+            GameState::Running => "Running".to_string(),
+            GameState::Paused => "Paused".to_string(),
+        };
+        **label = new_label;
     }
 }
