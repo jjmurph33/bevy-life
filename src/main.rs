@@ -30,9 +30,6 @@ enum GameState {
 // struct StateLabel;
 
 #[derive(Component)]
-struct Alive(bool);
-
-#[derive(Component)]
 struct Cell;
 
 #[derive(Resource)]
@@ -44,6 +41,7 @@ struct CurrentTile {
 #[derive(Resource)]
 struct Grid {
     cells: Vec<Option<Entity>>,
+    state: Vec<bool>,
     new_state: Vec<bool>,
     rows: usize,
     cols: usize,
@@ -52,13 +50,16 @@ struct Grid {
 impl Grid {
     fn new(rows: usize, cols: usize) -> Self {
         let mut cells: Vec<Option<Entity>> = Vec::with_capacity(rows * cols);
+        let mut state = Vec::with_capacity(rows * cols);
         let mut new_state = Vec::with_capacity(rows * cols);
         for _ in 0..(rows * cols) {
             cells.push(None);
+            state.push(false);
             new_state.push(false);
         }
         Grid {
             cells,
+            state,
             new_state,
             rows,
             cols,
@@ -127,7 +128,6 @@ fn setup_grid(mut commands: Commands) {
                         ..default()
                     },
                     Cell,
-                    Alive(false),
                 ))
                 .id();
             let index = (row * (grid.cols as u32) + column) as usize;
@@ -150,74 +150,67 @@ fn setup_ui(mut commands: Commands) {
     commands.insert_resource(current_tile);
 }
 
-fn update_cells(
-    mut grid: ResMut<Grid>,
-    mut cell_query: Query<(&mut Sprite, &mut Alive), With<Cell>>,
-) {
+fn update_cells(mut grid: ResMut<Grid>, mut cell_query: Query<&mut Sprite, With<Cell>>) {
     let max_row = ROWS as i32 - 1;
     let max_col = COLS as i32 - 1;
 
     // check each cell and update grid.new_state to mark them alive or dead
     for row in 0..ROWS {
         for col in 0..COLS {
-            if let Some(cell) = grid.get(row as usize, col as usize) {
-                if let Ok((_, alive)) = cell_query.get_mut(cell) {
-                    let current_state = alive.0;
-                    let mut neighbors_alive = 0;
-                    // (row,col) offset of each adjacent cell
-                    let neighbors: [(i32, i32); 8] = [
-                        (-1, -1),
-                        (-1, 0),
-                        (-1, 1),
-                        (0, -1),
-                        (0, 1),
-                        (1, -1),
-                        (1, 0),
-                        (1, 1),
-                    ];
-                    for (y, x) in neighbors {
-                        let mut new_row = row as i32 + y;
-                        let mut new_col = col as i32 + x;
+            let index = (row as usize) * grid.cols + (col as usize);
+            let current_state = grid.state[index];
 
-                        // wrap around the edges
-                        if new_row < 0 {
-                            new_row = max_row;
-                        } else if new_row > max_row {
-                            new_row = 0;
-                        }
-                        if new_col < 0 {
-                            new_col = max_col;
-                        } else if new_col > max_col {
-                            new_col = 0;
-                        }
+            let mut neighbors_alive = 0;
+            // (row,col) offset of each adjacent cell
+            let neighbors: [(i32, i32); 8] = [
+                (-1, -1),
+                (-1, 0),
+                (-1, 1),
+                (0, -1),
+                (0, 1),
+                (1, -1),
+                (1, 0),
+                (1, 1),
+            ];
+            for (y, x) in neighbors {
+                let mut new_row = row as i32 + y;
+                let mut new_col = col as i32 + x;
 
-                        if let Some(neighbor_cell) = grid.get(new_row as usize, new_col as usize) {
-                            if let Ok((_, alive)) = cell_query.get_mut(neighbor_cell) {
-                                if alive.0 {
-                                    neighbors_alive += 1;
-                                }
-                            }
-                        }
-                    }
-                    let mut new_state = current_state;
-                    if current_state == true {
-                        //Any live cell with fewer than two live neighbours dies
-                        if neighbors_alive < 2 {
-                            new_state = false;
-                        // Any live cell with more than three live neighbours dies (referred to as overpopulation or overcrowding).
-                        } else if neighbors_alive > 3 {
-                            new_state = false;
-                        }
-                    } else {
-                        // Any dead cell with exactly three live neighbours will come to life.
-                        if neighbors_alive == 3 {
-                            new_state = true;
-                        }
-                    }
-                    let index = (row as usize) * grid.cols + (col as usize);
-                    grid.new_state[index] = new_state;
+                // wrap around the edges
+                if new_row < 0 {
+                    new_row = max_row;
+                } else if new_row > max_row {
+                    new_row = 0;
                 }
-            };
+                if new_col < 0 {
+                    new_col = max_col;
+                } else if new_col > max_col {
+                    new_col = 0;
+                }
+
+                let neighbor_index = (new_row as usize) * grid.cols + (new_col as usize);
+                if grid.state[neighbor_index] {
+                    neighbors_alive += 1;
+                }
+            }
+
+            let mut new_state = current_state;
+            if current_state == true {
+                //Any live cell with fewer than two live neighbours dies
+                if neighbors_alive < 2 {
+                    new_state = false;
+                // Any live cell with more than three live neighbours dies (referred to as overpopulation or overcrowding).
+                } else if neighbors_alive > 3 {
+                    new_state = false;
+                }
+            } else {
+                // Any dead cell with exactly three live neighbours will come to life.
+                if neighbors_alive == 3 {
+                    new_state = true;
+                }
+            }
+
+            grid.new_state[index] = new_state;
         }
     }
 
@@ -225,12 +218,12 @@ fn update_cells(
     for row in 0..ROWS {
         for col in 0..COLS {
             if let Some(cell) = grid.get(row as usize, col as usize) {
-                if let Ok((mut sprite, mut alive)) = cell_query.get_mut(cell) {
-                    let current_state = alive.0;
+                if let Ok(mut sprite) = cell_query.get_mut(cell) {
                     let index = (row as usize) * grid.cols + (col as usize);
+                    let current_state = grid.state[index];
                     let new_state = grid.new_state[index];
                     if current_state != new_state {
-                        alive.0 = new_state;
+                        grid.state[index] = new_state;
                         if new_state {
                             sprite.color = COLOR_ALIVE;
                         } else {
@@ -247,9 +240,9 @@ fn mouse_button_input(
     buttons: Res<ButtonInput<MouseButton>>,
     window: Single<&Window, With<PrimaryWindow>>,
     camera_query: Single<(&Camera, &GlobalTransform)>,
-    grid: Res<Grid>,
+    mut grid: ResMut<Grid>,
     mut current_tile: ResMut<CurrentTile>,
-    mut query: Query<(&mut Sprite, &mut Alive), With<Cell>>,
+    mut query: Query<&mut Sprite, With<Cell>>,
 ) {
     if buttons.pressed(MouseButton::Left) {
         let (camera, camera_transform) = camera_query.into_inner();
@@ -264,10 +257,14 @@ fn mouse_button_input(
                     // check that we're on a different tile
                     if !(tile_x == current_tile.col && tile_y == current_tile.row) {
                         if let Some(cell) = grid.get(tile_y, tile_x) {
-                            if let Ok((mut sprite, mut alive)) = query.get_mut(cell) {
-                                alive.0 = !alive.0;
-                                sprite.color = if alive.0 { COLOR_ALIVE } else { COLOR_DEAD };
+                            if let Ok(mut sprite) = query.get_mut(cell) {
+                                // toggle this cell alive or dead
+                                let index = (tile_y as usize) * grid.cols + (tile_x as usize);
+                                let new_state = !grid.state[index];
+                                grid.state[index] = new_state;
+                                sprite.color = if new_state { COLOR_ALIVE } else { COLOR_DEAD };
                             }
+                            // store the current tile we're on
                             current_tile.col = tile_x;
                             current_tile.row = tile_y;
                         }
