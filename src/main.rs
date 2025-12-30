@@ -4,10 +4,13 @@
 // Any dead cell with exactly three live neighbours will come to life.
 
 use bevy::{
+    color::palettes::basic::*,
+    input_focus::InputFocus,
     prelude::*,
     time::common_conditions::on_timer,
     window::{PrimaryWindow, Window, WindowPlugin, WindowResolution},
 };
+
 use std::time::Duration;
 
 const TILE_SIZE: f32 = 16.0;
@@ -19,6 +22,10 @@ const COLOR_BACKGROUND: Color = Color::srgb(0.8, 0.8, 0.8);
 const COLOR_TEXT: Color = Color::srgb(0.0, 0.0, 0.0);
 const COLOR_ALIVE: Color = Color::srgb(0.0, 0.0, 0.0);
 const COLOR_DEAD: Color = Color::srgb(1.0, 1.0, 1.0);
+
+const NORMAL_BUTTON: Color = Color::srgb(0.15, 0.15, 0.15);
+const HOVERED_BUTTON: Color = Color::srgb(0.25, 0.25, 0.25);
+const PRESSED_BUTTON: Color = Color::srgb(0.35, 0.75, 0.35);
 
 #[derive(States, Debug, Clone, Eq, PartialEq, Hash, Default)]
 enum GameState {
@@ -86,10 +93,12 @@ fn main() {
             ..default()
         }))
         .init_state::<GameState>()
+        .init_resource::<InputFocus>()
         .add_systems(Startup, (setup_camera, setup_grid, setup_ui))
         .add_systems(Update, pause_input)
         .add_systems(Update, mouse_button_input)
         .add_systems(Update, update_text)
+        .add_systems(Update, button_system)
         .add_systems(
             Update,
             update_cells
@@ -157,6 +166,8 @@ fn setup_ui(mut commands: Commands) {
         TextColor(COLOR_TEXT),
         StateLabel,
     ));
+
+    commands.spawn(button());
 }
 
 fn update_cells(mut grid: ResMut<Grid>, mut cell_query: Query<&mut Sprite, With<Cell>>) {
@@ -299,5 +310,89 @@ fn update_text(state: Res<State<GameState>>, mut q: Query<&mut Text, With<StateL
             GameState::Paused => "Paused".to_string(),
         };
         **label = new_label;
+    }
+}
+
+fn button() -> impl Bundle {
+    (
+        Node {
+            width: percent(100),
+            height: percent(100),
+            position_type: PositionType::Absolute,
+            bottom: px(5),
+            left: px(220),
+            ..default()
+        },
+        children![(
+            Button,
+            Node {
+                width: px(150),
+                height: px(65),
+                border: UiRect::all(px(5)),
+                // horizontally center child text
+                justify_content: JustifyContent::Center,
+                // vertically center child text
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            BorderColor::all(Color::WHITE),
+            BorderRadius::MAX,
+            BackgroundColor(Color::BLACK),
+            children![(
+                Text::new("Paused"),
+                TextColor(Color::srgb(0.9, 0.9, 0.9)),
+                TextShadow::default(),
+            )]
+        )],
+    )
+}
+
+fn button_system(
+    mut input_focus: ResMut<InputFocus>,
+    mut interaction_query: Query<
+        (
+            Entity,
+            &Interaction,
+            &mut BackgroundColor,
+            &mut BorderColor,
+            &mut Button,
+            &Children,
+        ),
+        Changed<Interaction>,
+    >,
+    mut text_query: Query<&mut Text>,
+    state: Res<State<GameState>>,
+) {
+    for (entity, interaction, mut color, mut border_color, mut button, children) in
+        &mut interaction_query
+    {
+        let state = state.get();
+
+        let mut text = text_query.get_mut(children[0]).unwrap();
+
+        match *interaction {
+            Interaction::Pressed => {
+                input_focus.set(entity);
+                **text = "Press".to_string();
+                *color = PRESSED_BUTTON.into();
+                *border_color = BorderColor::all(RED);
+
+                // The accessibility system's only update the button's state when the `Button` component is marked as changed.
+                button.set_changed();
+            }
+            Interaction::Hovered => {
+                input_focus.set(entity);
+                **text = "Hover".to_string();
+                *color = HOVERED_BUTTON.into();
+                *border_color = BorderColor::all(Color::WHITE);
+                button.set_changed();
+            }
+            Interaction::None => {
+                input_focus.clear();
+                **text = "Button".to_string();
+                *color = NORMAL_BUTTON.into();
+                *border_color = BorderColor::all(Color::BLACK);
+            }
+        }
     }
 }
