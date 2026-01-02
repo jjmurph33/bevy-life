@@ -1,5 +1,5 @@
 [package]
-name = "life"
+name = "bevy-life"
 version = "0.1.0"
 edition = "2024"
 
@@ -12,5 +12,5 @@ opt-level = 1
 opt-level = 3
 
 [dependencies]
-bevy = { version = "0.17.2", features = ["dynamic_linking"] }
-bevy_procedural_tilemaps = "0.1.3"
+#bevy = { version = "0.17.2", features = ["dynamic_linking"] }
+bevy = { version = "0.17.3" }

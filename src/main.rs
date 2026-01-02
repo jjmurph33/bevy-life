@@ -4,7 +4,6 @@
 // Any dead cell with exactly three live neighbours will come to life.
 
 use bevy::{
-    color::palettes::basic::*,
     input_focus::InputFocus,
     prelude::*,
     time::common_conditions::on_timer,
@@ -19,23 +18,22 @@ const ROWS: usize = 20;
 const COLS: usize = 20;
 
 const COLOR_BACKGROUND: Color = Color::srgb(0.8, 0.8, 0.8);
-const COLOR_TEXT: Color = Color::srgb(0.0, 0.0, 0.0);
+//const COLOR_TEXT: Color = Color::srgb(0.0, 0.0, 0.0);
 const COLOR_ALIVE: Color = Color::srgb(0.0, 0.0, 0.0);
 const COLOR_DEAD: Color = Color::srgb(1.0, 1.0, 1.0);
-
-const NORMAL_BUTTON: Color = Color::srgb(0.15, 0.15, 0.15);
-const HOVERED_BUTTON: Color = Color::srgb(0.25, 0.25, 0.25);
-const PRESSED_BUTTON: Color = Color::srgb(0.35, 0.75, 0.35);
+const COLOR_BUTTON: Color = Color::srgb(0.15, 0.15, 0.15);
+const COLOR_BUTTON_HOVERED: Color = Color::srgb(0.25, 0.25, 0.25);
 
 #[derive(States, Debug, Clone, Eq, PartialEq, Hash, Default)]
 enum GameState {
     #[default]
+    Starting,
     Paused,
     Running,
 }
 
 #[derive(Component)]
-struct StateLabel;
+struct StateButton;
 
 #[derive(Component)]
 struct Cell;
@@ -97,8 +95,7 @@ fn main() {
         .add_systems(Startup, (setup_camera, setup_grid, setup_ui))
         .add_systems(Update, pause_input)
         .add_systems(Update, mouse_button_input)
-        .add_systems(Update, update_text)
-        .add_systems(Update, button_system)
+        .add_systems(Update, state_button_update)
         .add_systems(
             Update,
             update_cells
@@ -116,7 +113,7 @@ fn grid_height() -> u32 {
     (TILE_SIZE + TILE_GAP) as u32 * ROWS as u32
 }
 
-fn setup_grid(mut commands: Commands) {
+fn setup_grid(mut commands: Commands, mut next_state: ResMut<NextState<GameState>>) {
     let mut grid = Grid::new(ROWS as usize, COLS as usize);
     for row in 0..ROWS {
         for column in 0..COLS {
@@ -142,6 +139,11 @@ fn setup_grid(mut commands: Commands) {
         }
     }
     commands.insert_resource(grid);
+
+    // the last tile that was selected
+    commands.insert_resource(CurrentTile { row: 0, col: 0 });
+
+    next_state.set(GameState::Paused);
 }
 
 fn setup_camera(mut commands: Commands) {
@@ -151,23 +153,20 @@ fn setup_camera(mut commands: Commands) {
 }
 
 fn setup_ui(mut commands: Commands) {
-    // the last tile that was selected
-    commands.insert_resource(CurrentTile { row: 0, col: 0 });
-
     // the state label
-    commands.spawn((
-        Text::new("Paused"),
-        Node {
-            position_type: PositionType::Absolute,
-            bottom: px(5),
-            left: px(20),
-            ..default()
-        },
-        TextColor(COLOR_TEXT),
-        StateLabel,
-    ));
+    // commands.spawn((
+    //     Text::new("Paused"),
+    //     Node {
+    //         position_type: PositionType::Absolute,
+    //         bottom: px(5),
+    //         left: px(20),
+    //         ..default()
+    //     },
+    //     TextColor(COLOR_TEXT),
+    //     StateLabel,
+    // ));
 
-    commands.spawn(button());
+    commands.spawn(state_button_create());
 }
 
 fn update_cells(mut grid: ResMut<Grid>, mut cell_query: Query<&mut Sprite, With<Cell>>) {
@@ -180,7 +179,7 @@ fn update_cells(mut grid: ResMut<Grid>, mut cell_query: Query<&mut Sprite, With<
                 //Any live cell with fewer than two live neighbours dies
                 if num_neighbors_alive < 2 {
                     new_state = false;
-                // Any live cell with more than three live neighbours dies (referred to as overpopulation or overcrowding).
+                // Any live cell with more than three live neighbours dies
                 } else if num_neighbors_alive > 3 {
                     new_state = false;
                 }
@@ -297,49 +296,36 @@ fn pause_input(
 ) {
     if keys.just_pressed(KeyCode::Space) {
         match state.get() {
+            GameState::Starting => (),
             GameState::Running => next_state.set(GameState::Paused),
             GameState::Paused => next_state.set(GameState::Running),
         }
     }
 }
 
-fn update_text(state: Res<State<GameState>>, mut q: Query<&mut Text, With<StateLabel>>) {
-    if let Ok(mut label) = q.single_mut() {
-        let new_label = match state.get() {
-            GameState::Running => "Running".to_string(),
-            GameState::Paused => "Paused".to_string(),
-        };
-        **label = new_label;
-    }
-}
-
-fn button() -> impl Bundle {
+fn state_button_create() -> impl Bundle {
     (
         Node {
-            width: percent(100),
-            height: percent(100),
             position_type: PositionType::Absolute,
             bottom: px(5),
-            left: px(220),
+            left: px(20),
             ..default()
         },
         children![(
             Button,
+            StateButton,
             Node {
-                width: px(150),
-                height: px(65),
-                border: UiRect::all(px(5)),
-                // horizontally center child text
+                width: px(200),
+                height: px(25),
                 justify_content: JustifyContent::Center,
-                // vertically center child text
                 align_items: AlignItems::Center,
                 ..default()
             },
-            BorderColor::all(Color::WHITE),
-            BorderRadius::MAX,
-            BackgroundColor(Color::BLACK),
+            //BorderColor::all(Color::WHITE),
+            //BorderRadius::MAX,
+            //BackgroundColor(Color::BLACK),
             children![(
-                Text::new("Paused"),
+                Text::new("Run"),
                 TextColor(Color::srgb(0.9, 0.9, 0.9)),
                 TextShadow::default(),
             )]
@@ -347,9 +333,9 @@ fn button() -> impl Bundle {
     )
 }
 
-fn button_system(
+fn state_button_update(
     mut input_focus: ResMut<InputFocus>,
-    mut interaction_query: Query<
+    interaction_query: Single<
         (
             Entity,
             &Interaction,
@@ -358,41 +344,53 @@ fn button_system(
             &mut Button,
             &Children,
         ),
-        Changed<Interaction>,
+        //(Changed<Interaction>, With<StateButton>),
+        With<StateButton>,
     >,
     mut text_query: Query<&mut Text>,
     state: Res<State<GameState>>,
+    mut next_state: ResMut<NextState<GameState>>,
 ) {
-    for (entity, interaction, mut color, mut border_color, mut button, children) in
-        &mut interaction_query
-    {
-        let state = state.get();
-
-        let mut text = text_query.get_mut(children[0]).unwrap();
-
-        match *interaction {
-            Interaction::Pressed => {
-                input_focus.set(entity);
-                **text = "Press".to_string();
-                *color = PRESSED_BUTTON.into();
-                *border_color = BorderColor::all(RED);
-
-                // The accessibility system's only update the button's state when the `Button` component is marked as changed.
-                button.set_changed();
-            }
-            Interaction::Hovered => {
-                input_focus.set(entity);
-                **text = "Hover".to_string();
-                *color = HOVERED_BUTTON.into();
-                *border_color = BorderColor::all(Color::WHITE);
-                button.set_changed();
-            }
-            Interaction::None => {
-                input_focus.clear();
-                **text = "Button".to_string();
-                *color = NORMAL_BUTTON.into();
-                *border_color = BorderColor::all(Color::BLACK);
-            }
+    let (entity, interaction, mut color, mut border_color, mut button, children) =
+        interaction_query.into_inner();
+    let state = state.get();
+    let mut text = text_query.get_mut(children[0]).unwrap();
+    match *interaction {
+        Interaction::Pressed => {
+            input_focus.set(entity);
+            **text = match state {
+                GameState::Starting => "Loading...".to_string(),
+                GameState::Paused => {
+                    next_state.set(GameState::Running);
+                    "Pause".to_string()
+                }
+                GameState::Running => {
+                    next_state.set(GameState::Paused);
+                    "Run".to_string()
+                }
+            };
+            button.set_changed();
+        }
+        Interaction::Hovered => {
+            input_focus.set(entity);
+            **text = match state {
+                GameState::Starting => "Loading...".to_string(),
+                GameState::Paused => "Run".to_string(),
+                GameState::Running => "Pause".to_string(),
+            };
+            *color = COLOR_BUTTON_HOVERED.into();
+            *border_color = BorderColor::all(Color::WHITE);
+            button.set_changed();
+        }
+        Interaction::None => {
+            input_focus.clear();
+            **text = match state {
+                GameState::Starting => "Loading...".to_string(),
+                GameState::Paused => "Run".to_string(),
+                GameState::Running => "Pause".to_string(),
+            };
+            *color = COLOR_BUTTON.into();
+            *border_color = BorderColor::all(Color::BLACK);
         }
     }
 }
