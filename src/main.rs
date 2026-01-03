@@ -1,9 +1,10 @@
-// Any live cell with fewer than two live neighbours dies (referred to as underpopulation or exposure[2]).
+// Any live cell with fewer than two live neighbours dies (referred to as underpopulation or exposure).
 // Any live cell with more than three live neighbours dies (referred to as overpopulation or overcrowding).
 // Any live cell with two or three live neighbours lives, unchanged, to the next generation.
 // Any dead cell with exactly three live neighbours will come to life.
 
 use bevy::{
+    dev_tools::fps_overlay::{FpsOverlayConfig, FpsOverlayPlugin, FrameTimeGraphConfig},
     input_focus::InputFocus,
     prelude::*,
     time::common_conditions::on_timer,
@@ -14,15 +15,15 @@ use std::time::Duration;
 
 const TILE_SIZE: f32 = 16.0;
 const TILE_GAP: f32 = 2.0;
-const ROWS: usize = 20;
-const COLS: usize = 20;
+const ROWS: usize = 30;
+const COLS: usize = 30;
 
 const COLOR_BACKGROUND: Color = Color::srgb(0.8, 0.8, 0.8);
-//const COLOR_TEXT: Color = Color::srgb(0.0, 0.0, 0.0);
 const COLOR_ALIVE: Color = Color::srgb(0.0, 0.0, 0.0);
 const COLOR_DEAD: Color = Color::srgb(1.0, 1.0, 1.0);
 const COLOR_BUTTON: Color = Color::srgb(0.15, 0.15, 0.15);
 const COLOR_BUTTON_HOVERED: Color = Color::srgb(0.25, 0.25, 0.25);
+const COLOR_DEBUG_TEXT: Color = Color::srgb(1.0, 1.0, 1.0);
 
 #[derive(States, Debug, Clone, Eq, PartialEq, Hash, Default)]
 enum GameState {
@@ -91,14 +92,32 @@ fn main() {
     let window_height = grid_height() as f32 * 1.1 + 50.0;
     App::new()
         .insert_resource(ClearColor(COLOR_BACKGROUND))
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                resolution: WindowResolution::new(window_width as u32, window_height as u32),
-                resizable: false,
+        .add_plugins((
+            DefaultPlugins.set(WindowPlugin {
+                primary_window: Some(Window {
+                    resolution: WindowResolution::new(window_width as u32, window_height as u32),
+                    resizable: false,
+                    title: "Life".to_string(),
+                    ..default()
+                }),
                 ..default()
             }),
-            ..default()
-        }))
+            FpsOverlayPlugin {
+                config: FpsOverlayConfig {
+                    text_config: TextFont {
+                        font_size: 20.0,
+                        ..default()
+                    },
+                    text_color: COLOR_DEBUG_TEXT,
+                    enabled: false,
+                    frame_time_graph_config: FrameTimeGraphConfig {
+                        enabled: false,
+                        ..default()
+                    },
+                    ..default()
+                },
+            },
+        ))
         .init_state::<GameState>()
         .init_resource::<InputFocus>()
         .add_systems(Startup, (setup_camera, setup_grid, setup_ui))
@@ -110,6 +129,7 @@ fn main() {
                 state_button_update,
                 random_button_update,
                 clear_button_update,
+                debug_text_update,
             ),
         )
         .add_systems(
@@ -460,7 +480,7 @@ fn random_button_update(
     >,
     mut grid: ResMut<Grid>,
     mut rng: ResMut<GameRng>,
-    mut cell_q: Query<&mut Sprite, With<Cell>>
+    mut cell_q: Query<&mut Sprite, With<Cell>>,
 ) {
     let (interaction, mut color, mut border_color, mut button) = interaction_query.into_inner();
     match *interaction {
@@ -507,7 +527,7 @@ fn clear_button_update(
         (Changed<Interaction>, With<ClearButton>),
     >,
     mut grid: ResMut<Grid>,
-    mut cell_q: Query<&mut Sprite, With<Cell>>
+    mut cell_q: Query<&mut Sprite, With<Cell>>,
 ) {
     let (interaction, mut color, mut border_color, mut button) = interaction_query.into_inner();
     match *interaction {
@@ -536,4 +556,10 @@ fn clear_button_update(
         }
     }
     button.set_changed();
+}
+
+fn debug_text_update(input: Res<ButtonInput<KeyCode>>, mut overlay: ResMut<FpsOverlayConfig>) {
+    if input.just_pressed(KeyCode::F11) {
+        overlay.enabled = !overlay.enabled;
+    }
 }
