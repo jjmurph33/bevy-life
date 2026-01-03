@@ -9,7 +9,7 @@ use bevy::{
     time::common_conditions::on_timer,
     window::{PrimaryWindow, Window, WindowPlugin, WindowResolution},
 };
-
+use rand::{Rng, SeedableRng};
 use std::time::Duration;
 
 const TILE_SIZE: f32 = 16.0;
@@ -32,8 +32,17 @@ enum GameState {
     Running,
 }
 
+#[derive(Resource)]
+struct GameRng(rand::rngs::SmallRng);
+
 #[derive(Component)]
 struct StateButton;
+
+#[derive(Component)]
+struct RandomButton;
+
+#[derive(Component)]
+struct ClearButton;
 
 #[derive(Component)]
 struct Cell;
@@ -93,9 +102,16 @@ fn main() {
         .init_state::<GameState>()
         .init_resource::<InputFocus>()
         .add_systems(Startup, (setup_camera, setup_grid, setup_ui))
-        .add_systems(Update, pause_input)
-        .add_systems(Update, mouse_button_input)
-        .add_systems(Update, state_button_update)
+        .add_systems(
+            Update,
+            (
+                pause_input,
+                mouse_button_input,
+                state_button_update,
+                random_button_update,
+                clear_button_update,
+            ),
+        )
         .add_systems(
             Update,
             update_cells
@@ -166,7 +182,76 @@ fn setup_ui(mut commands: Commands) {
     //     StateLabel,
     // ));
 
-    commands.spawn(state_button_create());
+    // initialize the RNG
+    commands.insert_resource(GameRng(rand::rngs::SmallRng::from_os_rng()));
+
+    // create the buttons
+    commands.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            bottom: px(5),
+            left: px(20),
+            margin: UiRect::all(Val::Px(5.0)),
+            column_gap: Val::Px(10.0),
+            ..default()
+        },
+        children![
+            (
+                Button,
+                StateButton,
+                Node {
+                    width: px(100),
+                    height: px(25),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                BorderColor::all(Color::WHITE),
+                BorderRadius::MAX,
+                children![(
+                    Text::new("Run"),
+                    TextColor(Color::srgb(0.9, 0.9, 0.9)),
+                    TextShadow::default(),
+                )]
+            ),
+            (
+                Button,
+                RandomButton,
+                Node {
+                    width: px(100),
+                    height: px(25),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                BorderColor::all(Color::WHITE),
+                BorderRadius::MAX,
+                children![(
+                    Text::new("Random"),
+                    TextColor(Color::srgb(0.9, 0.9, 0.9)),
+                    TextShadow::default(),
+                )]
+            ),
+            (
+                Button,
+                ClearButton,
+                Node {
+                    width: px(100),
+                    height: px(25),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                BorderColor::all(Color::WHITE),
+                BorderRadius::MAX,
+                children![(
+                    Text::new("Clear"),
+                    TextColor(Color::srgb(0.9, 0.9, 0.9)),
+                    TextShadow::default(),
+                )]
+            )
+        ],
+    ));
 }
 
 fn update_cells(mut grid: ResMut<Grid>, mut cell_query: Query<&mut Sprite, With<Cell>>) {
@@ -196,11 +281,11 @@ fn update_cells(mut grid: ResMut<Grid>, mut cell_query: Query<&mut Sprite, With<
     // update the grid with the new state of each cell (alive or dead)
     for row in 0..ROWS {
         for col in 0..COLS {
-            if let Some(cell) = grid.get(row as usize, col as usize) {
-                if let Ok(mut sprite) = cell_query.get_mut(cell) {
-                    let current_state = grid.state[row][col];
-                    let new_state = grid.new_state[row][col];
-                    if current_state != new_state {
+            let current_state = grid.state[row][col];
+            let new_state = grid.new_state[row][col];
+            if current_state != new_state {
+                if let Some(cell) = grid.get(row as usize, col as usize) {
+                    if let Ok(mut sprite) = cell_query.get_mut(cell) {
                         grid.state[row][col] = new_state;
                         if new_state {
                             sprite.color = COLOR_ALIVE;
@@ -293,71 +378,47 @@ fn pause_input(
     keys: Res<ButtonInput<KeyCode>>,
     mut next_state: ResMut<NextState<GameState>>,
     state: Res<State<GameState>>,
+    button_q: Single<&Children, With<StateButton>>,
+    mut button_text_q: Query<&mut Text>,
 ) {
     if keys.just_pressed(KeyCode::Space) {
+        let state_button_children = button_q.into_inner();
+        let mut text = button_text_q.get_mut(state_button_children[0]).unwrap();
         match state.get() {
             GameState::Starting => (),
-            GameState::Running => next_state.set(GameState::Paused),
-            GameState::Paused => next_state.set(GameState::Running),
+            GameState::Running => {
+                next_state.set(GameState::Paused);
+                **text = "Run".to_string();
+            }
+            GameState::Paused => {
+                next_state.set(GameState::Running);
+                **text = "Pause".to_string();
+            }
         }
     }
 }
 
-fn state_button_create() -> impl Bundle {
-    (
-        Node {
-            position_type: PositionType::Absolute,
-            bottom: px(5),
-            left: px(20),
-            ..default()
-        },
-        children![(
-            Button,
-            StateButton,
-            Node {
-                width: px(200),
-                height: px(25),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                ..default()
-            },
-            //BorderColor::all(Color::WHITE),
-            //BorderRadius::MAX,
-            //BackgroundColor(Color::BLACK),
-            children![(
-                Text::new("Run"),
-                TextColor(Color::srgb(0.9, 0.9, 0.9)),
-                TextShadow::default(),
-            )]
-        )],
-    )
-}
-
 fn state_button_update(
-    mut input_focus: ResMut<InputFocus>,
     interaction_query: Single<
         (
-            Entity,
             &Interaction,
             &mut BackgroundColor,
             &mut BorderColor,
             &mut Button,
             &Children,
         ),
-        //(Changed<Interaction>, With<StateButton>),
-        With<StateButton>,
+        (Changed<Interaction>, With<StateButton>),
     >,
     mut text_query: Query<&mut Text>,
     state: Res<State<GameState>>,
     mut next_state: ResMut<NextState<GameState>>,
 ) {
-    let (entity, interaction, mut color, mut border_color, mut button, children) =
+    let (interaction, mut color, mut border_color, mut button, children) =
         interaction_query.into_inner();
     let state = state.get();
     let mut text = text_query.get_mut(children[0]).unwrap();
     match *interaction {
         Interaction::Pressed => {
-            input_focus.set(entity);
             **text = match state {
                 GameState::Starting => "Loading...".to_string(),
                 GameState::Paused => {
@@ -369,21 +430,12 @@ fn state_button_update(
                     "Run".to_string()
                 }
             };
-            button.set_changed();
         }
         Interaction::Hovered => {
-            input_focus.set(entity);
-            **text = match state {
-                GameState::Starting => "Loading...".to_string(),
-                GameState::Paused => "Run".to_string(),
-                GameState::Running => "Pause".to_string(),
-            };
             *color = COLOR_BUTTON_HOVERED.into();
             *border_color = BorderColor::all(Color::WHITE);
-            button.set_changed();
         }
         Interaction::None => {
-            input_focus.clear();
             **text = match state {
                 GameState::Starting => "Loading...".to_string(),
                 GameState::Paused => "Run".to_string(),
@@ -393,4 +445,95 @@ fn state_button_update(
             *border_color = BorderColor::all(Color::BLACK);
         }
     }
+    button.set_changed();
+}
+
+fn random_button_update(
+    interaction_query: Single<
+        (
+            &Interaction,
+            &mut BackgroundColor,
+            &mut BorderColor,
+            &mut Button,
+        ),
+        (Changed<Interaction>, With<RandomButton>),
+    >,
+    mut grid: ResMut<Grid>,
+    mut rng: ResMut<GameRng>,
+    mut cell_q: Query<&mut Sprite, With<Cell>>
+) {
+    let (interaction, mut color, mut border_color, mut button) = interaction_query.into_inner();
+    match *interaction {
+        Interaction::Pressed => {
+            for row in 0..ROWS {
+                for col in 0..COLS {
+                    // 33% chance of true
+                    let value = rng.0.random_bool(0.33);
+                    grid.state[row][col] = value;
+                    grid.new_state[row][col] = value;
+                    if let Some(cell) = grid.get(row as usize, col as usize) {
+                        if let Ok(mut sprite) = cell_q.get_mut(cell) {
+                            grid.state[row][col] = value;
+                            if value {
+                                sprite.color = COLOR_ALIVE;
+                            } else {
+                                sprite.color = COLOR_DEAD;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Interaction::Hovered => {
+            *color = COLOR_BUTTON_HOVERED.into();
+            *border_color = BorderColor::all(Color::WHITE);
+        }
+        Interaction::None => {
+            *color = COLOR_BUTTON.into();
+            *border_color = BorderColor::all(Color::BLACK);
+        }
+    }
+    button.set_changed();
+}
+
+fn clear_button_update(
+    interaction_query: Single<
+        (
+            &Interaction,
+            &mut BackgroundColor,
+            &mut BorderColor,
+            &mut Button,
+        ),
+        (Changed<Interaction>, With<ClearButton>),
+    >,
+    mut grid: ResMut<Grid>,
+    mut cell_q: Query<&mut Sprite, With<Cell>>
+) {
+    let (interaction, mut color, mut border_color, mut button) = interaction_query.into_inner();
+    match *interaction {
+        Interaction::Pressed => {
+            for row in 0..ROWS {
+                for col in 0..COLS {
+                    let value = false;
+                    grid.state[row][col] = value;
+                    grid.new_state[row][col] = value;
+                    if let Some(cell) = grid.get(row as usize, col as usize) {
+                        if let Ok(mut sprite) = cell_q.get_mut(cell) {
+                            grid.state[row][col] = value;
+                            sprite.color = COLOR_DEAD;
+                        }
+                    }
+                }
+            }
+        }
+        Interaction::Hovered => {
+            *color = COLOR_BUTTON_HOVERED.into();
+            *border_color = BorderColor::all(Color::WHITE);
+        }
+        Interaction::None => {
+            *color = COLOR_BUTTON.into();
+            *border_color = BorderColor::all(Color::BLACK);
+        }
+    }
+    button.set_changed();
 }
