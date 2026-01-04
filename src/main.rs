@@ -17,14 +17,18 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::time::Instant;
 
-const TILE_SIZE: f32 = 4.0;
+const TILE_SIZE: f32 = 5.0;
 const TILE_GAP: f32 = 1.0;
 const ROWS: usize = 100;
-const COLS: usize = 100;
+const COLS: usize = 200;
+const CELL_LIFETIME: u8 = 4; // number of ticks for a dead cell to decay
 
 const COLOR_BACKGROUND: Color = Color::srgb(0.8, 0.8, 0.8);
 const COLOR_ALIVE: Color = Color::srgb(0.0, 0.0, 0.0);
 const COLOR_DEAD: Color = Color::srgb(1.0, 1.0, 1.0);
+const COLOR_DECAY1: Color = Color::srgb(0.9, 0.9, 0.9);
+const COLOR_DECAY2: Color = Color::srgb(0.85, 0.85, 0.85);
+const COLOR_DECAY3: Color = Color::srgb(0.8, 0.8, 0.8);
 const COLOR_BUTTON: Color = Color::srgb(0.15, 0.15, 0.15);
 const COLOR_BUTTON_HOVERED: Color = Color::srgb(0.25, 0.25, 0.25);
 const COLOR_BUTTON_TEXT: Color = Color::srgb(0.9, 0.9, 0.9);
@@ -65,11 +69,8 @@ struct CurrentTile {
 #[derive(Resource)]
 struct Grid {
     cells: Vec<Option<Entity>>,
-    state: [[bool; COLS]; ROWS],
-    new_state: [[bool; COLS]; ROWS],
-    rows: usize,
-    cols: usize,
-    result_rows: Arc<Vec<Mutex<[bool; COLS]>>>,
+    state: [[u8; COLS]; ROWS], // CELL_LIFETIME = alive, less than CELL_LIFETIME = dead (decaying)
+    result_rows: Arc<Vec<Mutex<[bool; COLS]>>>, // mutex-protected buffer for each row
 }
 
 impl Grid {
@@ -78,22 +79,18 @@ impl Grid {
         for _ in 0..(rows * cols) {
             cells.push(None);
         }
-        // create a mutex-protected buffer for each row
         let result_rows: Arc<Vec<Mutex<[bool; COLS]>>> =
             Arc::new((0..ROWS).map(|_| Mutex::new([false; COLS])).collect());
         Grid {
             cells,
-            state: [[false; COLS]; ROWS],
-            new_state: [[false; COLS]; ROWS],
-            rows,
-            cols,
+            state: [[0; COLS]; ROWS],
             result_rows,
         }
     }
 
     fn get(&self, row: usize, col: usize) -> Option<Entity> {
-        if row < self.rows && col < self.cols {
-            self.cells[row * self.cols + col]
+        if row < ROWS && col < COLS {
+            self.cells[row * COLS + col]
         } else {
             None
         }
@@ -101,7 +98,7 @@ impl Grid {
 }
 
 fn main() {
-    let window_width = grid_width() as f32 * 1.2;
+    let window_width = grid_width() as f32 * 1.1;
     let window_height = grid_height() as f32 * 1.2 + 50.0;
     App::new()
         .insert_resource(ClearColor(COLOR_BACKGROUND))
@@ -172,15 +169,31 @@ fn grid_height() -> u32 {
 
 fn setup_grid(mut commands: Commands, mut next_state: ResMut<NextState<GameState>>) {
     let mut grid = Grid::new(ROWS as usize, COLS as usize);
+
+    // initialize the grid with a horizontal line in the middle
+    let active_row = ROWS / 2;
+    let active_col_start = COLS / 2 - (COLS / 4);
+    let active_col_end = COLS / 2 + (COLS / 4);
+
     for row in 0..ROWS {
         for column in 0..COLS {
+            // set the starting alive cells
+            let alive =
+                if row == active_row && column >= active_col_start && column < active_col_end {
+                    grid.state[row][column] = CELL_LIFETIME;
+                    true
+                } else {
+                    false
+                };
+
             let tile_x = column as f32 * (TILE_SIZE + TILE_GAP) + (TILE_SIZE / 2.0);
             let tile_y = row as f32 * (TILE_SIZE + TILE_GAP) + (TILE_SIZE / 2.0);
+
             // create each cell
             let cell = commands
                 .spawn((
                     Sprite {
-                        color: COLOR_DEAD,
+                        color: if alive { COLOR_ALIVE } else { COLOR_DEAD },
                         ..default()
                     },
                     Transform {
@@ -191,16 +204,17 @@ fn setup_grid(mut commands: Commands, mut next_state: ResMut<NextState<GameState
                     Cell,
                 ))
                 .id();
-            let index = (row * grid.cols + column) as usize;
+            let index = (row * COLS + column) as usize;
             grid.cells[index] = Some(cell);
         }
     }
+
     commands.insert_resource(grid);
 
     // the last tile that was selected
     commands.insert_resource(CurrentTile { row: 0, col: 0 });
 
-    next_state.set(GameState::Paused);
+    next_state.set(GameState::Running);
 }
 
 fn setup_camera(mut commands: Commands) {
@@ -315,31 +329,36 @@ fn update_cells(
         }
     });
 
-    // copy the computed rows into a local buffer, then replace grid.new_state
-    let mut computed_new_state = [[false; COLS]; ROWS];
+    // collect the results from each row
+    let mut new_state = [[false; COLS]; ROWS];
     for row in 0..ROWS {
         let section = grid.result_rows[row].lock().unwrap();
-        computed_new_state[row] = *section;
+        new_state[row] = *section;
     }
-    grid.new_state = computed_new_state;
 
     let mut num_alive = 0;
 
     // update the grid with the new state of each cell (alive or dead)
     for row in 0..ROWS {
         for col in 0..COLS {
-            let current_state = grid.state[row][col];
-            let new_state = grid.new_state[row][col];
-            if current_state != new_state {
-                if let Some(cell) = grid.get(row as usize, col as usize) {
-                    if let Ok(mut sprite) = cell_query.get_mut(cell) {
-                        grid.state[row][col] = new_state;
-                        if new_state {
-                            sprite.color = COLOR_ALIVE;
-                            num_alive += 1;
-                        } else {
-                            sprite.color = COLOR_DEAD;
+            let alive = new_state[row][col];
+            if let Some(cell) = grid.get(row as usize, col as usize) {
+                if let Ok(mut sprite) = cell_query.get_mut(cell) {
+                    if alive {
+                        grid.state[row][col] = CELL_LIFETIME;
+                        num_alive += 1;
+                    } else {
+                        // dead cells decay each tick
+                        if grid.state[row][col] > 0 {
+                            grid.state[row][col] -= 1;
                         }
+                    }
+                    match grid.state[row][col] {
+                        4 => sprite.color = COLOR_ALIVE,
+                        3 => sprite.color = COLOR_DECAY3,
+                        2 => sprite.color = COLOR_DECAY2,
+                        1 => sprite.color = COLOR_DECAY1,
+                        _ => sprite.color = COLOR_DEAD,
                     }
                 }
             }
@@ -351,12 +370,16 @@ fn update_cells(
     **debug_text = format!("Update time: {} ns\nAlive: {}", elapsed, num_alive);
 }
 
-fn update_row(section: &mut [bool; COLS], state: &[[bool; COLS]; ROWS], row: usize) {
+fn update_row(section: &mut [bool; COLS], state: &[[u8; COLS]; ROWS], row: usize) {
     for col in 0..COLS {
-        let current_state = state[row][col];
-        let mut new_state = current_state;
+        let alive = if state[row][col] == CELL_LIFETIME {
+            true
+        } else {
+            false
+        };
+        let mut new_state = alive;
         let num_neighbors_alive = living_neighbors(state, row, col);
-        if current_state == true {
+        if alive {
             //Any live cell with fewer than two live neighbours dies
             if num_neighbors_alive < 2 {
                 new_state = false;
@@ -374,7 +397,7 @@ fn update_row(section: &mut [bool; COLS], state: &[[bool; COLS]; ROWS], row: usi
     }
 }
 
-fn living_neighbors(state: &[[bool; COLS]; ROWS], row: usize, col: usize) -> u32 {
+fn living_neighbors(state: &[[u8; COLS]; ROWS], row: usize, col: usize) -> u32 {
     let mut neighbors_alive = 0;
     let max_row = ROWS as i32 - 1;
     let max_col = COLS as i32 - 1;
@@ -404,7 +427,7 @@ fn living_neighbors(state: &[[bool; COLS]; ROWS], row: usize, col: usize) -> u32
             new_col = 0;
         }
 
-        if state[new_row as usize][new_col as usize] {
+        if state[new_row as usize][new_col as usize] == CELL_LIFETIME {
             neighbors_alive += 1;
         }
     }
@@ -434,9 +457,13 @@ fn mouse_button_input(
                         if let Some(cell) = grid.get(row, col) {
                             if let Ok(mut sprite) = query.get_mut(cell) {
                                 // toggle this cell alive or dead
-                                let new_state = !grid.state[row][col];
-                                grid.state[row][col] = new_state;
-                                sprite.color = if new_state { COLOR_ALIVE } else { COLOR_DEAD };
+                                if grid.state[row][col] == CELL_LIFETIME {
+                                    grid.state[row][col] = 0;
+                                    sprite.color = COLOR_DEAD;
+                                } else {
+                                    grid.state[row][col] = CELL_LIFETIME;
+                                    sprite.color = COLOR_ALIVE;
+                                }
                             }
                             // store the current tile we're on
                             current_tile.col = col;
@@ -543,13 +570,13 @@ fn random_button_update(
             for row in 0..ROWS {
                 for col in 0..COLS {
                     // 33% chance of being alive
-                    let value = rng.0.random_bool(0.33);
+                    let alive = rng.0.random_bool(0.33);
+                    let value = if alive { CELL_LIFETIME } else { 0 };
                     grid.state[row][col] = value;
-                    grid.new_state[row][col] = value;
                     if let Some(cell) = grid.get(row as usize, col as usize) {
                         if let Ok(mut sprite) = cell_q.get_mut(cell) {
                             grid.state[row][col] = value;
-                            if value {
+                            if alive {
                                 sprite.color = COLOR_ALIVE;
                             } else {
                                 sprite.color = COLOR_DEAD;
@@ -589,12 +616,10 @@ fn clear_button_update(
         Interaction::Pressed => {
             for row in 0..ROWS {
                 for col in 0..COLS {
-                    let value = false;
-                    grid.state[row][col] = value;
-                    grid.new_state[row][col] = value;
+                    grid.state[row][col] = 0;
                     if let Some(cell) = grid.get(row as usize, col as usize) {
                         if let Ok(mut sprite) = cell_q.get_mut(cell) {
-                            grid.state[row][col] = value;
+                            grid.state[row][col] = 0;
                             sprite.color = COLOR_DEAD;
                         }
                     }
