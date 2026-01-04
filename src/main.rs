@@ -6,24 +6,27 @@
 use bevy::{
     dev_tools::fps_overlay::{FpsOverlayConfig, FpsOverlayPlugin, FrameTimeGraphConfig},
     input_focus::InputFocus,
+    log::{Level, LogPlugin},
     prelude::*,
     time::common_conditions::on_timer,
     window::{PrimaryWindow, Window, WindowPlugin, WindowResolution},
 };
 use rand::{Rng, SeedableRng};
 use std::time::Duration;
+use std::time::Instant;
 
-const TILE_SIZE: f32 = 16.0;
-const TILE_GAP: f32 = 2.0;
-const ROWS: usize = 30;
-const COLS: usize = 30;
+const TILE_SIZE: f32 = 4.0;
+const TILE_GAP: f32 = 1.0;
+const ROWS: usize = 100;
+const COLS: usize = 100;
 
 const COLOR_BACKGROUND: Color = Color::srgb(0.8, 0.8, 0.8);
 const COLOR_ALIVE: Color = Color::srgb(0.0, 0.0, 0.0);
 const COLOR_DEAD: Color = Color::srgb(1.0, 1.0, 1.0);
 const COLOR_BUTTON: Color = Color::srgb(0.15, 0.15, 0.15);
 const COLOR_BUTTON_HOVERED: Color = Color::srgb(0.25, 0.25, 0.25);
-const COLOR_DEBUG_TEXT: Color = Color::srgb(1.0, 1.0, 1.0);
+const COLOR_BUTTON_TEXT: Color = Color::srgb(0.9, 0.9, 0.9);
+const COLOR_DEBUG_TEXT: Color = Color::srgb(0.0, 0.5, 0.0);
 
 #[derive(States, Debug, Clone, Eq, PartialEq, Hash, Default)]
 enum GameState {
@@ -44,6 +47,9 @@ struct RandomButton;
 
 #[derive(Component)]
 struct ClearButton;
+
+#[derive(Component)]
+struct DebugText;
 
 #[derive(Component)]
 struct Cell;
@@ -88,20 +94,28 @@ impl Grid {
 }
 
 fn main() {
-    let window_width = grid_width() as f32 * 1.1;
-    let window_height = grid_height() as f32 * 1.1 + 50.0;
+    let window_width = grid_width() as f32 * 1.2;
+    let window_height = grid_height() as f32 * 1.2 + 50.0;
     App::new()
         .insert_resource(ClearColor(COLOR_BACKGROUND))
         .add_plugins((
-            DefaultPlugins.set(WindowPlugin {
-                primary_window: Some(Window {
-                    resolution: WindowResolution::new(window_width as u32, window_height as u32),
-                    resizable: false,
-                    title: "Life".to_string(),
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        resolution: WindowResolution::new(
+                            window_width as u32,
+                            window_height as u32,
+                        ),
+                        resizable: false,
+                        title: "Life".to_string(),
+                        ..default()
+                    }),
+                    ..default()
+                })
+                .set(LogPlugin {
+                    level: Level::ERROR,
                     ..default()
                 }),
-                ..default()
-            }),
             FpsOverlayPlugin {
                 config: FpsOverlayConfig {
                     text_config: TextFont {
@@ -189,19 +203,6 @@ fn setup_camera(mut commands: Commands) {
 }
 
 fn setup_ui(mut commands: Commands) {
-    // the state label
-    // commands.spawn((
-    //     Text::new("Paused"),
-    //     Node {
-    //         position_type: PositionType::Absolute,
-    //         bottom: px(5),
-    //         left: px(20),
-    //         ..default()
-    //     },
-    //     TextColor(COLOR_TEXT),
-    //     StateLabel,
-    // ));
-
     // initialize the RNG
     commands.insert_resource(GameRng(rand::rngs::SmallRng::from_os_rng()));
 
@@ -210,7 +211,7 @@ fn setup_ui(mut commands: Commands) {
         Node {
             position_type: PositionType::Absolute,
             bottom: px(5),
-            left: px(20),
+            left: px(0),
             margin: UiRect::all(Val::Px(5.0)),
             column_gap: Val::Px(10.0),
             ..default()
@@ -230,7 +231,7 @@ fn setup_ui(mut commands: Commands) {
                 BorderRadius::MAX,
                 children![(
                     Text::new("Run"),
-                    TextColor(Color::srgb(0.9, 0.9, 0.9)),
+                    TextColor(COLOR_BUTTON_TEXT),
                     TextShadow::default(),
                 )]
             ),
@@ -248,7 +249,7 @@ fn setup_ui(mut commands: Commands) {
                 BorderRadius::MAX,
                 children![(
                     Text::new("Random"),
-                    TextColor(Color::srgb(0.9, 0.9, 0.9)),
+                    TextColor(COLOR_BUTTON_TEXT),
                     TextShadow::default(),
                 )]
             ),
@@ -266,15 +267,35 @@ fn setup_ui(mut commands: Commands) {
                 BorderRadius::MAX,
                 children![(
                     Text::new("Clear"),
-                    TextColor(Color::srgb(0.9, 0.9, 0.9)),
+                    TextColor(COLOR_BUTTON_TEXT),
                     TextShadow::default(),
                 )]
             )
         ],
     ));
+
+    // debug text
+    commands.spawn((
+        Text::new("Debug Info"),
+        Node {
+            position_type: PositionType::Absolute,
+            top: px(0),
+            right: px(30),
+            ..default()
+        },
+        TextColor(COLOR_DEBUG_TEXT),
+        Visibility::Hidden,
+        DebugText,
+    ));
 }
 
-fn update_cells(mut grid: ResMut<Grid>, mut cell_query: Query<&mut Sprite, With<Cell>>) {
+fn update_cells(
+    mut grid: ResMut<Grid>,
+    mut cell_query: Query<&mut Sprite, With<Cell>>,
+    debug_text: Single<&mut Text, With<DebugText>>,
+) {
+    let timer = Instant::now();
+
     for row in 0..ROWS {
         for col in 0..COLS {
             let current_state = grid.state[row][col];
@@ -298,6 +319,11 @@ fn update_cells(mut grid: ResMut<Grid>, mut cell_query: Query<&mut Sprite, With<
         }
     }
 
+    let elapsed1 = timer.elapsed().as_nanos();
+    let timer = Instant::now();
+
+    let mut num_alive = 0;
+
     // update the grid with the new state of each cell (alive or dead)
     for row in 0..ROWS {
         for col in 0..COLS {
@@ -309,6 +335,7 @@ fn update_cells(mut grid: ResMut<Grid>, mut cell_query: Query<&mut Sprite, With<
                         grid.state[row][col] = new_state;
                         if new_state {
                             sprite.color = COLOR_ALIVE;
+                            num_alive += 1;
                         } else {
                             sprite.color = COLOR_DEAD;
                         }
@@ -317,6 +344,14 @@ fn update_cells(mut grid: ResMut<Grid>, mut cell_query: Query<&mut Sprite, With<
             }
         }
     }
+
+    let elapsed2 = timer.elapsed().as_nanos();
+
+    let mut debug_text = debug_text.into_inner();
+    **debug_text = format!(
+        "Generated: {} ns\nApplied: {} ns\nAlive: {}",
+        elapsed1, elapsed2, num_alive
+    );
 }
 
 fn living_neighbors(state: &[[bool; COLS]; ROWS], row: usize, col: usize) -> u32 {
@@ -558,8 +593,19 @@ fn clear_button_update(
     button.set_changed();
 }
 
-fn debug_text_update(input: Res<ButtonInput<KeyCode>>, mut overlay: ResMut<FpsOverlayConfig>) {
+fn debug_text_update(
+    input: Res<ButtonInput<KeyCode>>,
+    mut overlay: ResMut<FpsOverlayConfig>,
+    debug_text: Single<&mut Visibility, With<DebugText>>,
+) {
     if input.just_pressed(KeyCode::F11) {
         overlay.enabled = !overlay.enabled;
+
+        let mut debug_text_visibility = debug_text.into_inner();
+        *debug_text_visibility = if overlay.enabled {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
 }
