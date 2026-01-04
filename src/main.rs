@@ -8,10 +8,12 @@ use bevy::{
     input_focus::InputFocus,
     log::{Level, LogPlugin},
     prelude::*,
+    tasks::ComputeTaskPool,
     time::common_conditions::on_timer,
     window::{PrimaryWindow, Window, WindowPlugin, WindowResolution},
 };
 use rand::{Rng, SeedableRng};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::time::Instant;
 
@@ -67,6 +69,7 @@ struct Grid {
     new_state: [[bool; COLS]; ROWS],
     rows: usize,
     cols: usize,
+    result_rows: Arc<Vec<Mutex<[bool; COLS]>>>,
 }
 
 impl Grid {
@@ -75,12 +78,16 @@ impl Grid {
         for _ in 0..(rows * cols) {
             cells.push(None);
         }
+        // create a mutex-protected buffer for each row
+        let result_rows: Arc<Vec<Mutex<[bool; COLS]>>> =
+            Arc::new((0..ROWS).map(|_| Mutex::new([false; COLS])).collect());
         Grid {
             cells,
             state: [[false; COLS]; ROWS],
             new_state: [[false; COLS]; ROWS],
             rows,
             cols,
+            result_rows,
         }
     }
 
@@ -276,7 +283,7 @@ fn setup_ui(mut commands: Commands) {
 
     // debug text
     commands.spawn((
-        Text::new("Debug Info"),
+        Text::new(""),
         Node {
             position_type: PositionType::Absolute,
             top: px(0),
@@ -295,32 +302,26 @@ fn update_cells(
     debug_text: Single<&mut Text, With<DebugText>>,
 ) {
     let timer = Instant::now();
+    let state = &grid.state.clone();
 
-    for row in 0..ROWS {
-        for col in 0..COLS {
-            let current_state = grid.state[row][col];
-            let mut new_state = current_state;
-            let num_neighbors_alive = living_neighbors(&grid.state, row, col);
-            if current_state == true {
-                //Any live cell with fewer than two live neighbours dies
-                if num_neighbors_alive < 2 {
-                    new_state = false;
-                // Any live cell with more than three live neighbours dies
-                } else if num_neighbors_alive > 3 {
-                    new_state = false;
-                }
-            } else {
-                // Any dead cell with exactly three live neighbours will come to life.
-                if num_neighbors_alive == 3 {
-                    new_state = true;
-                }
-            }
-            grid.new_state[row][col] = new_state;
+    // spawn a task for each row
+    ComputeTaskPool::get().scope(|s| {
+        for row in 0..ROWS {
+            let result_rows = grid.result_rows.clone();
+            s.spawn(async move {
+                let mut section = result_rows[row].lock().unwrap();
+                update_row(&mut *section, &state, row);
+            });
         }
-    }
+    });
 
-    let elapsed1 = timer.elapsed().as_nanos();
-    let timer = Instant::now();
+    // copy the computed rows into a local buffer, then replace grid.new_state
+    let mut computed_new_state = [[false; COLS]; ROWS];
+    for row in 0..ROWS {
+        let section = grid.result_rows[row].lock().unwrap();
+        computed_new_state[row] = *section;
+    }
+    grid.new_state = computed_new_state;
 
     let mut num_alive = 0;
 
@@ -345,13 +346,32 @@ fn update_cells(
         }
     }
 
-    let elapsed2 = timer.elapsed().as_nanos();
-
+    let elapsed = timer.elapsed().as_nanos();
     let mut debug_text = debug_text.into_inner();
-    **debug_text = format!(
-        "Generated: {} ns\nApplied: {} ns\nAlive: {}",
-        elapsed1, elapsed2, num_alive
-    );
+    **debug_text = format!("Update time: {} ns\nAlive: {}", elapsed, num_alive);
+}
+
+fn update_row(section: &mut [bool; COLS], state: &[[bool; COLS]; ROWS], row: usize) {
+    for col in 0..COLS {
+        let current_state = state[row][col];
+        let mut new_state = current_state;
+        let num_neighbors_alive = living_neighbors(state, row, col);
+        if current_state == true {
+            //Any live cell with fewer than two live neighbours dies
+            if num_neighbors_alive < 2 {
+                new_state = false;
+            // Any live cell with more than three live neighbours dies
+            } else if num_neighbors_alive > 3 {
+                new_state = false;
+            }
+        } else {
+            // Any dead cell with exactly three live neighbours will come to life.
+            if num_neighbors_alive == 3 {
+                new_state = true;
+            }
+        }
+        section[col] = new_state;
+    }
 }
 
 fn living_neighbors(state: &[[bool; COLS]; ROWS], row: usize, col: usize) -> u32 {
@@ -522,7 +542,7 @@ fn random_button_update(
         Interaction::Pressed => {
             for row in 0..ROWS {
                 for col in 0..COLS {
-                    // 33% chance of true
+                    // 33% chance of being alive
                     let value = rng.0.random_bool(0.33);
                     grid.state[row][col] = value;
                     grid.new_state[row][col] = value;
