@@ -17,10 +17,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::time::Instant;
 
-const TILE_SIZE: f32 = 5.0;
+const TILE_SIZE: f32 = 10.0;
 const TILE_GAP: f32 = 1.0;
-const ROWS: usize = 100;
-const COLS: usize = 200;
+const ROWS: usize = 10;
+const COLS: usize = 20;
 const CELL_LIFETIME: u8 = 4; // number of ticks for a dead cell to decay
 
 const COLOR_BACKGROUND: Color = Color::srgb(0.8, 0.8, 0.8);
@@ -64,6 +64,7 @@ struct Cell;
 struct CurrentTile {
     row: usize,
     col: usize,
+    timer: f32,
 }
 
 #[derive(Resource)]
@@ -212,7 +213,7 @@ fn setup_grid(mut commands: Commands, mut next_state: ResMut<NextState<GameState
     commands.insert_resource(grid);
 
     // the last tile that was selected
-    commands.insert_resource(CurrentTile { row: 0, col: 0 });
+    commands.insert_resource(CurrentTile { row: 0, col: 0, timer: 0.0 });
 
     next_state.set(GameState::Running);
 }
@@ -441,6 +442,7 @@ fn mouse_button_input(
     mut grid: ResMut<Grid>,
     mut current_tile: ResMut<CurrentTile>,
     mut query: Query<&mut Sprite, With<Cell>>,
+    time: Res<Time>,
 ) {
     if buttons.pressed(MouseButton::Left) {
         let (camera, camera_transform) = camera_query.into_inner();
@@ -452,8 +454,16 @@ fn mouse_button_input(
                 if tile_x >= 0.0 && tile_y >= 0.0 {
                     let col = tile_x as usize;
                     let row = tile_y as usize;
-                    // check that we're on a different tile
-                    if !(col == current_tile.col && row == current_tile.row) {
+                    // ignore repeated clicks on the same cell
+                    let handle_click = if col == current_tile.col
+                        && row == current_tile.row
+                        && current_tile.timer < (time.elapsed_secs() + 1.0)
+                    {
+                        false
+                    } else {
+                        true
+                    };
+                    if handle_click {
                         if let Some(cell) = grid.get(row, col) {
                             if let Ok(mut sprite) = query.get_mut(cell) {
                                 // toggle this cell alive or dead
@@ -465,9 +475,10 @@ fn mouse_button_input(
                                     sprite.color = COLOR_ALIVE;
                                 }
                             }
-                            // store the current tile we're on
+                            // store the current tile and time we clicked
                             current_tile.col = col;
                             current_tile.row = row;
+                            current_tile.timer = time.elapsed_secs();
                         }
                     }
                 }
