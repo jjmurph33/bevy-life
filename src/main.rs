@@ -60,7 +60,7 @@ struct DebugText;
 #[derive(Component)]
 struct Cell;
 
-#[derive(Resource)]
+#[derive(Resource,Debug)]
 struct CurrentTile {
     row: usize,
     col: usize,
@@ -457,7 +457,7 @@ fn mouse_button_input(
                     // ignore repeated clicks on the same cell
                     let handle_click = if col == current_tile.col
                         && row == current_tile.row
-                        && current_tile.timer < (time.elapsed_secs() + 1.0)
+                        && (current_tile.timer + 1.0) >= time.elapsed_secs()
                     {
                         false
                     } else {
