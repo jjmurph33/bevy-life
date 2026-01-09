@@ -17,11 +17,11 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::time::Instant;
 
-const TILE_SIZE: f32 = 10.0;
+const TILE_SIZE: f32 = 8.0;
 const TILE_GAP: f32 = 1.0;
-const ROWS: usize = 10;
-const COLS: usize = 20;
-const CELL_LIFETIME: u8 = 4; // number of ticks for a dead cell to decay
+const ROWS: usize = 100;
+const COLS: usize = 200;
+const CELL_LIFETIME: u8 = 6; // number of ticks for a dead cell to decay
 
 const COLOR_BACKGROUND: Color = Color::srgb(0.8, 0.8, 0.8);
 const COLOR_ALIVE: Color = Color::srgb(0.0, 0.0, 0.0);
@@ -29,6 +29,8 @@ const COLOR_DEAD: Color = Color::srgb(1.0, 1.0, 1.0);
 const COLOR_DECAY1: Color = Color::srgb(0.9, 0.9, 0.9);
 const COLOR_DECAY2: Color = Color::srgb(0.85, 0.85, 0.85);
 const COLOR_DECAY3: Color = Color::srgb(0.8, 0.8, 0.8);
+const COLOR_DECAY4: Color = Color::srgb(0.75, 0.75, 0.75);
+const COLOR_DECAY5: Color = Color::srgb(0.7, 0.7, 0.7);
 const COLOR_BUTTON: Color = Color::srgb(0.15, 0.15, 0.15);
 const COLOR_BUTTON_HOVERED: Color = Color::srgb(0.25, 0.25, 0.25);
 const COLOR_BUTTON_TEXT: Color = Color::srgb(0.9, 0.9, 0.9);
@@ -60,7 +62,7 @@ struct DebugText;
 #[derive(Component)]
 struct Cell;
 
-#[derive(Resource,Debug)]
+#[derive(Resource, Debug)]
 struct CurrentTile {
     row: usize,
     col: usize,
@@ -99,8 +101,8 @@ impl Grid {
 }
 
 fn main() {
-    let window_width = grid_width() as f32 * 1.1;
-    let window_height = grid_height() as f32 * 1.2 + 50.0;
+    let window_width = grid_width() as f32 * 1.01;
+    let window_height = grid_height() as f32 * 1.01 + 50.0;
     App::new()
         .insert_resource(ClearColor(COLOR_BACKGROUND))
         .add_plugins((
@@ -213,14 +215,18 @@ fn setup_grid(mut commands: Commands, mut next_state: ResMut<NextState<GameState
     commands.insert_resource(grid);
 
     // the last tile that was selected
-    commands.insert_resource(CurrentTile { row: 0, col: 0, timer: 0.0 });
+    commands.insert_resource(CurrentTile {
+        row: 0,
+        col: 0,
+        timer: 0.0,
+    });
 
     next_state.set(GameState::Running);
 }
 
 fn setup_camera(mut commands: Commands) {
     let center_x = grid_width() as f32 / 2.0;
-    let center_y = grid_height() as f32 / 2.0;
+    let center_y = grid_height() as f32 / 2.0 - 25.0;
     commands.spawn((Camera2d, Transform::from_xyz(center_x, center_y, 0.)));
 }
 
@@ -233,7 +239,7 @@ fn setup_ui(mut commands: Commands) {
         Node {
             position_type: PositionType::Absolute,
             bottom: px(5),
-            left: px(0),
+            left: px(10),
             margin: UiRect::all(Val::Px(5.0)),
             column_gap: Val::Px(10.0),
             ..default()
@@ -355,7 +361,9 @@ fn update_cells(
                         }
                     }
                     match grid.state[row][col] {
-                        4 => sprite.color = COLOR_ALIVE,
+                        6 => sprite.color = COLOR_ALIVE,
+                        5 => sprite.color = COLOR_DECAY5,
+                        4 => sprite.color = COLOR_DECAY4,
                         3 => sprite.color = COLOR_DECAY3,
                         2 => sprite.color = COLOR_DECAY2,
                         1 => sprite.color = COLOR_DECAY1,
