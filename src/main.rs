@@ -9,7 +9,6 @@ use bevy::{
     log::{Level, LogPlugin},
     prelude::*,
     tasks::ComputeTaskPool,
-    time::common_conditions::on_timer,
     window::{PrimaryWindow, Window, WindowPlugin, WindowResolution},
 };
 use rand::{Rng, SeedableRng};
@@ -19,8 +18,8 @@ use std::time::Instant;
 
 const TILE_SIZE: f32 = 8.0;
 const TILE_GAP: f32 = 1.0;
-const ROWS: usize = 100;
-const COLS: usize = 200;
+const ROWS: usize = 50;
+const COLS: usize = 100;
 const CELL_LIFETIME: u8 = 6; // number of ticks for a dead cell to decay
 
 const COLOR_BACKGROUND: Color = Color::srgb(0.8, 0.8, 0.8);
@@ -35,6 +34,7 @@ const COLOR_BUTTON: Color = Color::srgb(0.15, 0.15, 0.15);
 const COLOR_BUTTON_HOVERED: Color = Color::srgb(0.25, 0.25, 0.25);
 const COLOR_BUTTON_TEXT: Color = Color::srgb(0.9, 0.9, 0.9);
 const COLOR_DEBUG_TEXT: Color = Color::srgb(0.0, 0.5, 0.0);
+const COLOR_TEXT: Color = Color::srgb(0.0, 0.0, 0.0);
 
 #[derive(States, Debug, Clone, Eq, PartialEq, Hash, Default)]
 enum GameState {
@@ -60,6 +60,9 @@ struct ClearButton;
 struct DebugText;
 
 #[derive(Component)]
+struct StatusText;
+
+#[derive(Component)]
 struct Cell;
 
 #[derive(Resource, Debug)]
@@ -70,10 +73,19 @@ struct CurrentTile {
 }
 
 #[derive(Resource)]
+struct TickDelay(u64);
+impl Default for TickDelay {
+    fn default() -> Self {
+        TickDelay(500)
+    }
+}
+
+#[derive(Resource)]
 struct Grid {
     cells: Vec<Option<Entity>>,
     state: [[u8; COLS]; ROWS], // CELL_LIFETIME = alive, less than CELL_LIFETIME = dead (decaying)
     result_rows: Arc<Vec<Mutex<[bool; COLS]>>>, // mutex-protected buffer for each row
+    num_alive: usize,
 }
 
 impl Grid {
@@ -88,9 +100,9 @@ impl Grid {
             cells,
             state: [[0; COLS]; ROWS],
             result_rows,
+            num_alive: 0,
         }
     }
-
     fn get(&self, row: usize, col: usize) -> Option<Entity> {
         if row < ROWS && col < COLS {
             self.cells[row * COLS + col]
@@ -141,23 +153,36 @@ fn main() {
         ))
         .init_state::<GameState>()
         .init_resource::<InputFocus>()
+        .init_resource::<TickDelay>()
         .add_systems(Startup, (setup_camera, setup_grid, setup_ui))
         .add_systems(
             Update,
             (
-                pause_input,
+                keyboard_input,
                 mouse_button_input,
                 state_button_update,
                 random_button_update,
                 clear_button_update,
                 debug_text_update,
+                status_text_update,
             ),
         )
         .add_systems(
             Update,
             update_cells
                 .run_if(in_state(GameState::Running))
-                .run_if(on_timer(Duration::from_millis(500))),
+                // update the grid when the tick delay timer finishes
+                .run_if(
+                    |mut timer: Local<Timer>, time: Res<Time>, tick_delay: Res<TickDelay>| {
+                        let delay = Duration::from_millis(tick_delay.0);
+                        if timer.duration() != delay {
+                            // update the timer if the delay has changed
+                            *timer = Timer::new(delay, TimerMode::Repeating);
+                        }
+                        timer.tick(time.delta());
+                        timer.just_finished()
+                    },
+                ),
         )
         .run();
 }
@@ -315,6 +340,23 @@ fn setup_ui(mut commands: Commands) {
         Visibility::Hidden,
         DebugText,
     ));
+
+    // status text
+    commands.spawn((
+        Text::new(""),
+        TextFont {
+            font_size: 16.0,
+            ..default()
+        },
+        Node {
+            position_type: PositionType::Absolute,
+            bottom: px(5),
+            left: px(350),
+            ..default()
+        },
+        TextColor(COLOR_TEXT),
+        StatusText,
+    ));
 }
 
 fn update_cells(
@@ -374,9 +416,11 @@ fn update_cells(
         }
     }
 
+    grid.num_alive = num_alive;
+
     let elapsed = timer.elapsed().as_nanos();
     let mut debug_text = debug_text.into_inner();
-    **debug_text = format!("Update time: {} ns\nAlive: {}", elapsed, num_alive);
+    **debug_text = format!("Update time: {} ns", elapsed);
 }
 
 fn update_row(section: &mut [bool; COLS], state: &[[u8; COLS]; ROWS], row: usize) {
@@ -495,16 +539,19 @@ fn mouse_button_input(
     }
 }
 
-fn pause_input(
+fn keyboard_input(
     keys: Res<ButtonInput<KeyCode>>,
-    mut next_state: ResMut<NextState<GameState>>,
     state: Res<State<GameState>>,
-    button_q: Single<&Children, With<StateButton>>,
-    mut button_text_q: Query<&mut Text>,
+    mut next_state: ResMut<NextState<GameState>>,
+    state_button_q: Single<&Children, With<StateButton>>,
+    mut state_button_text_q: Query<&mut Text>,
+    mut tick_delay: ResMut<TickDelay>,
 ) {
     if keys.just_pressed(KeyCode::Space) {
-        let state_button_children = button_q.into_inner();
-        let mut text = button_text_q.get_mut(state_button_children[0]).unwrap();
+        let state_button_children = state_button_q.into_inner();
+        let mut text = state_button_text_q
+            .get_mut(state_button_children[0])
+            .unwrap();
         match state.get() {
             GameState::Starting => (),
             GameState::Running => {
@@ -515,6 +562,16 @@ fn pause_input(
                 next_state.set(GameState::Running);
                 **text = "Pause".to_string();
             }
+        }
+    } else if keys.just_pressed(KeyCode::Minus) || keys.just_pressed(KeyCode::NumpadSubtract) {
+        // speed up
+        if tick_delay.0 >= 100 {
+            tick_delay.0 -= 100;
+        }
+    } else if keys.just_pressed(KeyCode::Equal) || keys.just_pressed(KeyCode::NumpadAdd) {
+        // slow down
+        if tick_delay.0 <= 400 {
+            tick_delay.0 += 100;
         }
     }
 }
@@ -672,4 +729,21 @@ fn debug_text_update(
             Visibility::Hidden
         };
     }
+}
+
+fn status_text_update(
+    status_text: Single<&mut Text, With<StatusText>>,
+    grid: Res<Grid>,
+    tick_delay: Res<TickDelay>,
+) {
+    let delay_text = if tick_delay.0 == 0 {
+        "None  ".to_string()
+    } else {
+        format!("{} ms", tick_delay.0)
+    };
+    let mut status_text = status_text.into_inner();
+    **status_text = format!(
+        "Tick Delay(-/+): {}  Number of Living Cells: {}",
+        delay_text, grid.num_alive
+    );
 }
