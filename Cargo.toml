@@ -11,6 +11,13 @@ opt-level = 1
 [profile.dev.package."*"]
 opt-level = 3
 
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
+
 [dependencies]
 #bevy = { version = "0.17.2", features = ["dynamic_linking"] }
 bevy = { version = "0.17.3", features = ["bevy_dev_tools"]}
