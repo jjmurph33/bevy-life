@@ -1,5 +1,5 @@
-<!doctype html><html lang=en><meta charset=utf-8><meta content="width=device-width,initial-scale=1" name=viewport><meta content="Conway's Game of Life - A Bevy implementation" name=description><title>Bevy Life</title><style>html,body{background:#0f3460;width:100%;height:100%;margin:0;padding:0;overflow:hidden}body{padding:20px 0 0 20px}canvas{display:block}</style><link crossorigin href=bevy-life.js rel=modulepreload><link as=fetch crossorigin href=bevy-life_bg.wasm rel=preload type=application/wasm></head><body><script type=module>import init, * as bindings from 'bevy-life.js';
-const wasm = await init({ module_or_path: 'bevy-life_bg.wasm' });
+<!doctype html><html lang=en><meta charset=utf-8><meta content="width=device-width,initial-scale=1" name=viewport><meta content="Conway's Game of Life - A Bevy implementation" name=description><title>Bevy Life</title><style>html,body{background:#0f3460;width:100%;height:100%;margin:0;padding:0;overflow:hidden}body{padding:20px 0 0 20px}canvas{display:block}</style><link crossorigin href=./bevy-life.js rel=modulepreload><link as=fetch crossorigin href=./bevy-life_bg.wasm rel=preload type=application/wasm></head><body><script type=module>import init, * as bindings from './bevy-life.js';
+const wasm = await init({ module_or_path: './bevy-life_bg.wasm' });
 
 
 window.wasmBindings = bindings;
