@@ -4,17 +4,19 @@
 // Any dead cell with exactly three live neighbours will come to life.
 
 use bevy::{
-    dev_tools::fps_overlay::{FpsOverlayConfig, FpsOverlayPlugin, FrameTimeGraphConfig},
     input_focus::InputFocus,
     log::{Level, LogPlugin},
     prelude::*,
     tasks::ComputeTaskPool,
     window::{PrimaryWindow, Window, WindowPlugin, WindowResolution},
 };
+
+#[cfg(not(target_arch = "wasm32"))]
+use bevy::dev_tools::fps_overlay::{FpsOverlayConfig, FpsOverlayPlugin, FrameTimeGraphConfig};
 use rand::{Rng, SeedableRng};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use std::time::Instant;
+//use std::time::Instant;
 
 const TILE_SIZE: f32 = 8.0;
 const TILE_GAP: f32 = 1.0;
@@ -26,10 +28,10 @@ const COLOR_BACKGROUND: Color = Color::srgb(0.8, 0.8, 0.8);
 const COLOR_ALIVE: Color = Color::srgb(0.0, 0.0, 0.0);
 const COLOR_DEAD: Color = Color::srgb(1.0, 1.0, 1.0);
 const COLOR_DECAY1: Color = Color::srgb(0.9, 0.9, 0.9);
-const COLOR_DECAY2: Color = Color::srgb(0.85, 0.85, 0.85);
-const COLOR_DECAY3: Color = Color::srgb(0.8, 0.8, 0.8);
-const COLOR_DECAY4: Color = Color::srgb(0.75, 0.75, 0.75);
-const COLOR_DECAY5: Color = Color::srgb(0.7, 0.7, 0.7);
+const COLOR_DECAY2: Color = Color::srgb(0.8, 0.8, 0.8);
+const COLOR_DECAY3: Color = Color::srgb(0.7, 0.7, 0.7);
+const COLOR_DECAY4: Color = Color::srgb(0.6, 0.6, 0.6);
+const COLOR_DECAY5: Color = Color::srgb(0.5, 0.5, 0.5);
 const COLOR_BUTTON: Color = Color::srgb(0.15, 0.15, 0.15);
 const COLOR_BUTTON_HOVERED: Color = Color::srgb(0.25, 0.25, 0.25);
 const COLOR_BUTTON_TEXT: Color = Color::srgb(0.9, 0.9, 0.9);
@@ -69,7 +71,7 @@ struct Cell;
 struct CurrentTile {
     row: usize,
     col: usize,
-    timer: f32,
+    //timer: f32,
 }
 
 #[derive(Resource)]
@@ -115,9 +117,9 @@ impl Grid {
 fn main() {
     let window_width = grid_width() as f32 * 1.01;
     let window_height = grid_height() as f32 * 1.01 + 50.0;
-    App::new()
-        .insert_resource(ClearColor(COLOR_BACKGROUND))
-        .add_plugins((
+    let mut app = App::new();
+    app.insert_resource(ClearColor(COLOR_BACKGROUND))
+        .add_plugins(
             DefaultPlugins
                 .set(WindowPlugin {
                     primary_window: Some(Window {
@@ -135,23 +137,26 @@ fn main() {
                     level: Level::ERROR,
                     ..default()
                 }),
-            FpsOverlayPlugin {
-                config: FpsOverlayConfig {
-                    text_config: TextFont {
-                        font_size: 20.0,
-                        ..default()
-                    },
-                    text_color: COLOR_DEBUG_TEXT,
-                    enabled: false,
-                    frame_time_graph_config: FrameTimeGraphConfig {
-                        enabled: false,
-                        ..default()
-                    },
-                    ..default()
-                },
+        );
+
+    #[cfg(not(target_arch = "wasm32"))]
+    app.add_plugins(FpsOverlayPlugin {
+        config: FpsOverlayConfig {
+            text_config: TextFont {
+                font_size: 20.0,
+                ..default()
             },
-        ))
-        .init_state::<GameState>()
+            text_color: COLOR_DEBUG_TEXT,
+            enabled: false,
+            frame_time_graph_config: FrameTimeGraphConfig {
+                enabled: false,
+                ..default()
+            },
+            ..default()
+        },
+    });
+
+    app.init_state::<GameState>()
         .init_resource::<InputFocus>()
         .init_resource::<TickDelay>()
         .add_systems(Startup, (setup_camera, setup_grid, setup_ui))
@@ -163,6 +168,7 @@ fn main() {
                 state_button_update,
                 random_button_update,
                 clear_button_update,
+                #[cfg(not(target_arch = "wasm32"))]
                 debug_text_update,
                 status_text_update,
             ),
@@ -243,7 +249,7 @@ fn setup_grid(mut commands: Commands, mut next_state: ResMut<NextState<GameState
     commands.insert_resource(CurrentTile {
         row: 0,
         col: 0,
-        timer: 0.0,
+        //timer: 0.0,
     });
 
     next_state.set(GameState::Running);
@@ -362,9 +368,9 @@ fn setup_ui(mut commands: Commands) {
 fn update_cells(
     mut grid: ResMut<Grid>,
     mut cell_query: Query<&mut Sprite, With<Cell>>,
-    debug_text: Single<&mut Text, With<DebugText>>,
+    //debug_text: Single<&mut Text, With<DebugText>>,
 ) {
-    let timer = Instant::now();
+    //let timer = Instant::now();
     let state = &grid.state.clone();
 
     // spawn a task for each row
@@ -418,9 +424,9 @@ fn update_cells(
 
     grid.num_alive = num_alive;
 
-    let elapsed = timer.elapsed().as_nanos();
-    let mut debug_text = debug_text.into_inner();
-    **debug_text = format!("Update time: {} ns", elapsed);
+    //let elapsed = timer.elapsed().as_nanos();
+    //let mut debug_text = debug_text.into_inner();
+    //**debug_text = format!("Update time: {} ns", elapsed);
 }
 
 fn update_row(section: &mut [bool; COLS], state: &[[u8; COLS]; ROWS], row: usize) {
@@ -487,6 +493,82 @@ fn living_neighbors(state: &[[u8; COLS]; ROWS], row: usize, col: usize) -> u32 {
     neighbors_alive
 }
 
+// synchronous version of update_cells (may be needed for WASM)
+#[allow(dead_code)]
+fn update_cells_sync(
+    mut grid: ResMut<Grid>,
+    mut cell_query: Query<&mut Sprite, With<Cell>>,
+    //debug_text: Single<&mut Text, With<DebugText>>,
+) {
+    //let timer = Instant::now();
+    let state = &grid.state.clone();
+    let mut new_state = [[false; COLS]; ROWS];
+
+    for row in 0..ROWS {
+        for col in 0..COLS {
+            let alive = if state[row][col] == CELL_LIFETIME {
+                true
+            } else {
+                false
+            };
+            let mut new_cell_state = alive;
+            let num_neighbors_alive = living_neighbors(state, row, col);
+            if alive {
+                //Any live cell with fewer than two live neighbours dies
+                if num_neighbors_alive < 2 {
+                    new_cell_state = false;
+                // Any live cell with more than three live neighbours dies
+                } else if num_neighbors_alive > 3 {
+                    new_cell_state = false;
+                }
+            } else {
+                // Any dead cell with exactly three live neighbours will come to life.
+                if num_neighbors_alive == 3 {
+                    new_cell_state = true;
+                }
+            }
+            new_state[row][col] = new_cell_state;
+        }
+    }
+
+    let mut num_alive = 0;
+
+    // update the grid with the new state of each cell (alive or dead)
+    for row in 0..ROWS {
+        for col in 0..COLS {
+            let alive = new_state[row][col];
+            if let Some(cell) = grid.get(row as usize, col as usize) {
+                if let Ok(mut sprite) = cell_query.get_mut(cell) {
+                    if alive {
+                        grid.state[row][col] = CELL_LIFETIME;
+                        num_alive += 1;
+                    } else {
+                        // dead cells decay each tick
+                        if grid.state[row][col] > 0 {
+                            grid.state[row][col] -= 1;
+                        }
+                    }
+                    match grid.state[row][col] {
+                        6 => sprite.color = COLOR_ALIVE,
+                        5 => sprite.color = COLOR_DECAY5,
+                        4 => sprite.color = COLOR_DECAY4,
+                        3 => sprite.color = COLOR_DECAY3,
+                        2 => sprite.color = COLOR_DECAY2,
+                        1 => sprite.color = COLOR_DECAY1,
+                        _ => sprite.color = COLOR_DEAD,
+                    }
+                }
+            }
+        }
+    }
+
+    grid.num_alive = num_alive;
+
+    //let elapsed = timer.elapsed().as_nanos();
+    //let mut debug_text = debug_text.into_inner();
+    //**debug_text = format!("Update time: {} ns\nAlive: {}", elapsed, num_alive);
+}
+
 fn mouse_button_input(
     buttons: Res<ButtonInput<MouseButton>>,
     window: Single<&Window, With<PrimaryWindow>>,
@@ -494,7 +576,7 @@ fn mouse_button_input(
     mut grid: ResMut<Grid>,
     mut current_tile: ResMut<CurrentTile>,
     mut query: Query<&mut Sprite, With<Cell>>,
-    time: Res<Time>,
+    //time: Res<Time>,
 ) {
     if buttons.pressed(MouseButton::Left) {
         let (camera, camera_transform) = camera_query.into_inner();
@@ -507,10 +589,8 @@ fn mouse_button_input(
                     let col = tile_x as usize;
                     let row = tile_y as usize;
                     // ignore repeated clicks on the same cell
-                    let handle_click = if col == current_tile.col
-                        && row == current_tile.row
-                        && (current_tile.timer + 1.0) >= time.elapsed_secs()
-                    {
+                    //&& (current_tile.timer + 1.0) >= time.elapsed_secs()
+                    let handle_click = if col == current_tile.col && row == current_tile.row {
                         false
                     } else {
                         true
@@ -530,7 +610,7 @@ fn mouse_button_input(
                             // store the current tile and time we clicked
                             current_tile.col = col;
                             current_tile.row = row;
-                            current_tile.timer = time.elapsed_secs();
+                            //current_tile.timer = time.elapsed_secs();
                         }
                     }
                 }
@@ -714,6 +794,7 @@ fn clear_button_update(
     button.set_changed();
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn debug_text_update(
     input: Res<ButtonInput<KeyCode>>,
     mut overlay: ResMut<FpsOverlayConfig>,
