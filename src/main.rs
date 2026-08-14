@@ -13,6 +13,7 @@ use bevy::{
 
 #[cfg(not(target_arch = "wasm32"))]
 use bevy::dev_tools::fps_overlay::{FpsOverlayConfig, FpsOverlayPlugin, FrameTimeGraphConfig};
+
 use rand::{Rng, SeedableRng};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -143,7 +144,7 @@ fn main() {
     app.add_plugins(FpsOverlayPlugin {
         config: FpsOverlayConfig {
             text_config: TextFont {
-                font_size: 20.0,
+                font_size: FontSize::Px(20.0),
                 ..default()
             },
             text_color: COLOR_DEBUG_TEXT,
@@ -284,10 +285,10 @@ fn setup_ui(mut commands: Commands) {
                     height: px(25),
                     justify_content: JustifyContent::Center,
                     align_items: AlignItems::Center,
+                    border_radius: BorderRadius::MAX,
                     ..default()
                 },
                 BorderColor::all(Color::WHITE),
-                BorderRadius::MAX,
                 children![(
                     Text::new("Run"),
                     TextColor(COLOR_BUTTON_TEXT),
@@ -302,10 +303,10 @@ fn setup_ui(mut commands: Commands) {
                     height: px(25),
                     justify_content: JustifyContent::Center,
                     align_items: AlignItems::Center,
+                    border_radius: BorderRadius::MAX,
                     ..default()
                 },
                 BorderColor::all(Color::WHITE),
-                BorderRadius::MAX,
                 children![(
                     Text::new("Random"),
                     TextColor(COLOR_BUTTON_TEXT),
@@ -320,10 +321,10 @@ fn setup_ui(mut commands: Commands) {
                     height: px(25),
                     justify_content: JustifyContent::Center,
                     align_items: AlignItems::Center,
+                    border_radius: BorderRadius::MAX,
                     ..default()
                 },
                 BorderColor::all(Color::WHITE),
-                BorderRadius::MAX,
                 children![(
                     Text::new("Clear"),
                     TextColor(COLOR_BUTTON_TEXT),
@@ -351,7 +352,7 @@ fn setup_ui(mut commands: Commands) {
     commands.spawn((
         Text::new(""),
         TextFont {
-            font_size: 16.0,
+            font_size: FontSize::Px(16.0),
             ..default()
         },
         Node {
